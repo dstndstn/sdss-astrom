@@ -35,40 +35,32 @@ def year_to_mjd(year):
     from tractor.tractortime import TAITime
     return (year - 2000.) * TAITime.daysperyear + TAITime.mjd2k
 
-def main():
-    sdss_dir = '/project/projectdirs/cosmo/data/sdss/dr13/eboss'
+def run_one_run(X):
+    (W, iw_offset, run, sdss_dir) = X
 
     gaiacat = GaiaCatalog()
-    
-    W = fits_table(os.path.join(sdss_dir, 'resolve/2013-07-29/window_flist.fits'))
-    
-    # Resume previous run?
-    if False:
-        Results = fits_table('sdss-astrom.fits')
-        IW = np.flatnonzero(Results.did_fit == False)
-    else:
-        Results = fits_table()
-        Results.run = W.run
-        Results.camcol = W.camcol
-        Results.field = W.field
-        Results.did_fit = np.zeros(len(W), bool)
-        Results.ra_offset_median  = np.zeros(len(W), np.float32)
-        Results.dec_offset_median = np.zeros(len(W), np.float32)
-        Results.chisq_before_fit  = np.zeros(len(W), np.float32)
-        Results.chisq_after_fit  = np.zeros(len(W), np.float32)
-        Results.ra_offset  = np.zeros(len(W), np.float32)
-        Results.dec_offset = np.zeros(len(W), np.float32)
-        Results.dra_drow  = np.zeros(len(W), np.float32)
-        Results.dra_dcol  = np.zeros(len(W), np.float32)
-        Results.ddec_drow = np.zeros(len(W), np.float32)
-        Results.ddec_dcol = np.zeros(len(W), np.float32)
-        Results.n_sdss = np.zeros(len(W), np.int16)
-        Results.n_gaia = np.zeros(len(W), np.int16)
-        Results.n_sdss_good = np.zeros(len(W), np.int16)
-        Results.n_gaia_good = np.zeros(len(W), np.int16)
-        Results.n_matched = np.zeros(len(W), np.int16)
-        IW = range(len(W))
 
+    Results = fits_table()
+    Results.run = W.run
+    Results.camcol = W.camcol
+    Results.field = W.field
+    Results.did_fit = np.zeros(len(W), bool)
+    Results.ra_offset_median  = np.zeros(len(W), np.float32)
+    Results.dec_offset_median = np.zeros(len(W), np.float32)
+    Results.chisq_before_fit  = np.zeros(len(W), np.float32)
+    Results.chisq_after_fit  = np.zeros(len(W), np.float32)
+    Results.ra_offset  = np.zeros(len(W), np.float32)
+    Results.dec_offset = np.zeros(len(W), np.float32)
+    Results.dra_drow  = np.zeros(len(W), np.float32)
+    Results.dra_dcol  = np.zeros(len(W), np.float32)
+    Results.ddec_drow = np.zeros(len(W), np.float32)
+    Results.ddec_dcol = np.zeros(len(W), np.float32)
+    Results.n_sdss = np.zeros(len(W), np.int16)
+    Results.n_gaia = np.zeros(len(W), np.int16)
+    Results.n_sdss_good = np.zeros(len(W), np.int16)
+    Results.n_gaia_good = np.zeros(len(W), np.int16)
+    Results.n_matched = np.zeros(len(W), np.int16)
+    IW = np.arange(len(W))
 
     allmatches = []
     for iw_index,iw in enumerate(IW):
@@ -254,28 +246,56 @@ def main():
         matches.field     = np.array([w.field] *len(matches))
         matches.field_ra  = np.array([w.ra]    *len(matches))
         matches.field_dec = np.array([w.dec]   *len(matches))
-        matches.window_flist_row = np.array([iw] * len(matches))
+        matches.window_flist_row = np.array([iw + iw_offset] * len(matches))
 
         allmatches.append(matches)
 
-        write_matches = False
-        if iw_index == len(IW)-1:
-            # last one?
-            write_matches = True
-        else:
-            write_matches = (w.run != W.run[IW[iw_index+1]])
+        # write_matches = False
+        # if iw_index == len(IW)-1:
+        #     # last one?
+        #     write_matches = True
+        # else:
+        #     write_matches = (w.run != W.run[IW[iw_index+1]])
+        # if write_matches:
+        #     allmatches = merge_tables(allmatches)
+        #     fn = '/global/cscratch1/sd/dstn/sdss-gaia/matches-run%04i.fits' % w.run
+        #     allmatches.writeto(fn)
+        #     print('Wrote', fn)
+        #     allmatches = []
 
-        if write_matches:
-            allmatches = merge_tables(allmatches)
-            fn = '/global/cscratch1/sd/dstn/sdss-gaia/matches-run%04i.fits' % w.run
-            allmatches.writeto(fn)
-            print('Wrote', fn)
-            allmatches = []
+    if len(allmatches):
+        allmatches = merge_tables(allmatches)
+        fn = '/global/cscratch1/sd/dstn/sdss-gaia/matches-run%04i.fits' % run
+        allmatches.writeto(fn)
+        print('Wrote', fn)
 
-    #Results = Results[:20]
+    Results.writeto('sdss-astrom-run%04i.fits' % run)
 
-    Results.writeto('sdss-astrom.fits')
 
+
+
+def main():
+    sdss_dir = '/project/projectdirs/cosmo/data/sdss/dr13/eboss'
+    W = fits_table(os.path.join(sdss_dir, 'resolve/2013-07-29/window_flist.fits'))
+    
+    args = []
+    runs = np.unique(W.run)
+    for r in runs:
+
+        outfn = 'sdss-astrom-run%04i.fits' % r
+        if os.path.exists(outfn):
+            print('Output exists:', outfn)
+            continue
+
+        I = np.flatnonzero(W.run == r)
+        # Assume contiguous
+        assert(I[-1] == I[0] + len(I) - 1)
+        print(len(I), 'for run', r)
+        args.append((W[I], I[0], r, sdss_dir))
+
+    from astrometry.util.multiproc import multiproc
+    mp = multiproc(8)
+    mp.map(run_one_run, args)
 
 
 if __name__ == '__main__':
